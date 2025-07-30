@@ -18,12 +18,12 @@ It uses Docker Compose to spin up a minimal Frappe/ERPNext environment, mount lo
 
 - **`Jenkinsfile`**  
   Jenkins pipeline script to:
-  1. Clone your ERPNext fork and checkout a pull request branch.
-  2. Mount it into the Docker container via bind mounts.
-  3. Spin up the environment using `docker-compose`.
-  4. Create a test site using `create-site`.
-  5. Run automated checks.
-  6. Clean up the environment after the job.
+  - Clone your ERPNext fork and checkout a pull request branch.
+  - Mount it into the Docker container via bind mounts.
+  - Spin up the environment using `docker-compose`.
+  - Create a test site using `create-site`.
+  - Run automated checks.
+  - Clean up the environment after the job.
 
 ---
 
