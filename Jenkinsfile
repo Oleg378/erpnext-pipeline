@@ -1,8 +1,11 @@
 pipeline {
   agent any
 
+  parameters {
+    string(name: 'PR_BRANCH', defaultValue: 'develop', description: 'Branch to test (e.g., feature/my-fix)')
+  }
+
   environment {
-    PR_BRANCH = "${env.BRANCH_NAME}"  // "develop" Branch name from webhook or multibranch
     ERP_REPO = 'https://github.com/Oleg378/erpnext.git'
     DOCKER_REPO = 'https://github.com/Oleg378/erpnext-pipeline.git'
     DOCKER_DIR = 'erpnext-pipeline'
@@ -16,7 +19,7 @@ pipeline {
     stage('Checkout ERPNext PR') {
       steps {
         dir("${ERP_DIR}") {
-          git url: "${ERP_REPO}", branch: "${PR_BRANCH}", changelog: false, poll: false
+          git url: "${ERP_REPO}", branch: "${params.PR_BRANCH}", changelog: false, poll: false
         }
       }
     }
@@ -94,7 +97,6 @@ pipeline {
           def report = readJSON file: "${TEST_REPORT}"
           if (report.failures == 0) {
             echo "✅ Tests passed. PR is OK!"
-            // call GitHub API or notify to proceed with merge
           } else {
             error("❌ Tests failed. Rejecting PR")
           }
