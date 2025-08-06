@@ -17,6 +17,8 @@ jobs:
         run: |
           echo "Triggering Jenkins for PR branch: ${{ github.event.client_payload.branch }}"
           
-          curl --location --request POST "$JENKINS_URL/job/$JOB_NAME/buildWithParameters?PR_BRANCH=${{ github.event.client_payload.branch }}" \
+          curl --location --request POST \
+            "$JENKINS_URL/job/$JOB_NAME/buildWithParameters?\
+            PR_BRANCH=${{ github.event.client_payload.branch }}&\
+            GIT_COMMIT=${{ github.event.client_payload.commit }}" \
             --user "$JENKINS_USERNAME:$JENKINS_TOKEN"
-
