@@ -3,6 +3,7 @@ pipeline {
 
   parameters {
     string(name: 'PR_BRANCH', defaultValue: 'develop', description: 'Branch to test (e.g., feature/my-fix)')
+    string(name: 'GIT_COMMIT', defaultValue: '', description: 'Git commit SHA to report status to')
   }
 
   environment {
@@ -13,6 +14,7 @@ pipeline {
     SITE_NAME = 'localhost'
     CONTAINER_NAME = 'backend'
     TEST_REPORT = 'test-report.json'
+    GITHUB_TOKEN = credentials('github-status-token')
   }
 
   stages {
@@ -87,18 +89,53 @@ pipeline {
     stage('Publish Test Report') {
       steps {
         archiveArtifacts artifacts: "${TEST_REPORT}", onlyIfSuccessful: true
-        // In real setup: publishHTML or junit integration here
       }
     }
 
     stage('Approve or Reject PR') {
       steps {
         script {
+          if (!params.GIT_COMMIT?.trim()) {
+            error("Commit SHA parameter (GIT_COMMIT) is required")
+          }
+
+          if (!fileExists("${TEST_REPORT}")) {
+            error("Test report not found at ${TEST_REPORT}")
+          }
+
           def report = readJSON file: "${TEST_REPORT}"
-          if (report.failures == 0) {
-            echo "✅ Tests passed. PR is OK!"
-          } else {
-            error("❌ Tests failed. Rejecting PR")
+          def status = report.failures == 0 ? 'success' : 'failure'
+          def description = report.failures == 0 ?
+            "All ${report.tests} tests passed" :
+            "${report.failures} test(s) failed"
+
+          // Prepare API payload
+          def curlCmd = """
+            curl -sS -X POST \
+              -H "Authorization: token \$GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Content-Type: application/json" \
+              "https://api.github.com/repos/Oleg378/erpnext/statuses/${params.GIT_COMMIT}" \
+              -d '{
+                "state": "${status}",
+                "target_url": "${env.BUILD_URL}",
+                "description": "${description}",
+                "context": "jenkins/ci"
+              }'
+          """.stripIndent()
+
+          // Update GitHub status
+          try {
+            def response = sh(script: curlCmd, returnStdout: true)
+            echo "GitHub status updated: ${status}"
+            echo "API Response: ${response}"
+          } catch (Exception e) {
+            error("Failed to update GitHub status: ${e.getMessage()}\nCommand: ${curlCmd}")
+          }
+
+          // Fail the build if tests failed
+          if (report.failures > 0) {
+            error("❌ Tests failed. PR rejected")
           }
         }
       }
