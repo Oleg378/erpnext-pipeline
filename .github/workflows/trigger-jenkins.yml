@@ -11,11 +11,12 @@ jobs:
       JENKINS_URL: ${{ secrets.JENKINS_URL }}
       JENKINS_USERNAME: ${{ secrets.JENKINS_USERNAME }}
       JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}
+      JOB_NAME: ${{ secrets.JOB_NAME }}
     steps:
       - name: Trigger Jenkins Job
         run: |
           echo "Triggering Jenkins for PR branch: ${{ github.event.client_payload.branch }}"
           
-          curl --location --request POST "$JENKINS_URL?PR_BRANCH=${{ github.event.client_payload.branch }}" \
+          curl --location --request POST "$JENKINS_URL/job/$JOB_NAME/buildWithParameters?PR_BRANCH=${{ github.event.client_payload.branch }}" \
             --user "$JENKINS_USERNAME:$JENKINS_TOKEN"
 
