@@ -43,7 +43,7 @@ pipeline {
           '''
 
           script {
-            def siteExists = sh (
+            def siteExists = sh(
               script: "docker compose exec ${CONTAINER_NAME} bash -c 'ls /home/frappe/frappe-bench/sites/${SITE_NAME}/site_config.json 2>/dev/null'",
               returnStatus: true
             ) == 0
@@ -98,44 +98,66 @@ pipeline {
           if (!params.GIT_COMMIT?.trim()) {
             error("Commit SHA parameter (GIT_COMMIT) is required")
           }
+          if (!params.GIT_COMMIT.matches(/^[a-f0-9]{40}$/)) {
+            error("Invalid GIT_COMMIT format (expected 40-character SHA)")
+          }
 
           if (!fileExists("${TEST_REPORT}")) {
             error("Test report not found at ${TEST_REPORT}")
           }
 
+          // Parse and validate test report
           def report = readJSON file: "${TEST_REPORT}"
+          if (!report.tests || report.failures == null) {
+            error("Invalid test report format - missing required fields")
+          }
+
+          // Determine status
           def status = report.failures == 0 ? 'success' : 'failure'
           def description = report.failures == 0 ?
             "All ${report.tests} tests passed" :
             "${report.failures} test(s) failed"
 
-          // Prepare API payload
-          def curlCmd = """
-            curl -sS -X POST \
-              -H "Authorization: token \$GITHUB_TOKEN" \
-              -H "Accept: application/vnd.github.v3+json" \
-              -H "Content-Type: application/json" \
-              "https://api.github.com/repos/Oleg378/erpnext/statuses/${params.GIT_COMMIT}" \
-              -d '{
-                "state": "${status}",
-                "target_url": "${env.BUILD_URL}",
-                "description": "${description}",
-                "context": "jenkins/ci"
-              }'
+          // Prepare API request
+          def apiUrl = "https://api.github.com/repos/Oleg378/erpnext/statuses/${params.GIT_COMMIT}"
+          def payload = """
+          {
+            "state": "${status}",
+            "target_url": "${env.BUILD_URL}",
+            "description": "${description}",
+            "context": "jenkins/ci"
+          }
           """.stripIndent()
 
           // Update GitHub status
           try {
-            def response = sh(script: curlCmd, returnStdout: true)
-            echo "GitHub status updated: ${status}"
-            echo "API Response: ${response}"
+            def response = httpRequest(
+              accept: 'application/vnd.github.v3+json',
+              contentType: 'APPLICATION_JSON',
+              customHeaders: [
+                [name: 'Authorization', value: "token ${env.GITHUB_TOKEN}"],
+                [name: 'Accept', value: 'application/vnd.github.v3+json']
+              ],
+              httpMode: 'POST',
+              requestBody: payload,
+              url: apiUrl,
+              validResponseCodes: '200,201'
+            )
+
+            echo "GitHub status updated successfully: ${status}"
+            echo "API Response: ${response.content}"
           } catch (Exception e) {
-            error("Failed to update GitHub status: ${e.getMessage()}\nCommand: ${curlCmd}")
+            echo "⚠GitHub API Request Details:"
+            echo "URL: ${apiUrl}"
+            echo "Payload: ${payload}"
+            error("Failed to update GitHub status: ${e.getMessage()}")
           }
 
-          // Fail the build if tests failed
+          // Final build decision
           if (report.failures > 0) {
             error("❌ Tests failed. PR rejected")
+          } else {
+            echo "✅ All checks passed - PR approved"
           }
         }
       }
