@@ -132,22 +132,21 @@ pipeline {
           // Update GitHub status
           try {
             def response = httpRequest(
-              accept: 'application/vnd.github.v3+json',
+              httpMode: 'POST',
+              url: apiUrl,
               contentType: 'APPLICATION_JSON',
               customHeaders: [
-                [name: 'Authorization', value: "token ${env.GITHUB_TOKEN}"],
+                [name: 'Authorization', value: "token " + GITHUB_TOKEN],
                 [name: 'Accept', value: 'application/vnd.github.v3+json']
               ],
-              httpMode: 'POST',
               requestBody: payload,
-              url: apiUrl,
-              validResponseCodes: '200,201'
+              validResponseCodes: '200,201,204'
             )
 
             echo "GitHub status updated successfully: ${status}"
             echo "API Response: ${response.content}"
           } catch (Exception e) {
-            echo "⚠GitHub API Request Details:"
+            echo "GitHub API Request Details:"
             echo "URL: ${apiUrl}"
             echo "Payload: ${payload}"
             error("Failed to update GitHub status: ${e.getMessage()}")
