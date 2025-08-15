@@ -2,7 +2,7 @@ pipeline {
   agent any
 
   parameters {
-    string(name: 'PR_BRANCH', defaultValue: 'develop', description: 'Branch to test (e.g., feature/my-fix)')
+    string(name: 'PR_BRANCH', defaultValue: 'version-15', description: 'Branch to test (e.g., feature/my-fix)')
     string(name: 'GIT_COMMIT', defaultValue: '', description: 'Git commit SHA to report status to')
   }
 

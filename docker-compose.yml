@@ -2,7 +2,7 @@ version: "3"
 
 services:
   backend:
-    image: frappe/erpnext:latest
+    image: frappe/erpnext:version-15
     networks:
       - frappe_network
     deploy:
@@ -21,7 +21,7 @@ services:
       MARIADB_ROOT_PASSWORD: admin
 
   configurator:
-    image: frappe/erpnext:latest
+    image: frappe/erpnext:version-15
     networks:
       - frappe_network
     deploy:
@@ -50,7 +50,7 @@ services:
       - logs:/home/frappe/frappe-bench/logs
 
   create-site:
-    image: frappe/erpnext:latest
+    image: frappe/erpnext:version-15
     networks:
       - frappe_network
     deploy:
