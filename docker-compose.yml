@@ -122,10 +122,77 @@ services:
     deploy:
       restart_policy:
         condition: on-failure
+    volumes:
+      - redis-cache-data:/data
+
+  worker-default:
+    image: frappe/erpnext:version-15
+    networks:
+      - frappe_network
+    deploy:
+      restart_policy:
+        condition: on-failure
+    command: bench worker --queue default
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+    depends_on:
+      - redis-queue
+    environment:
+      REDIS_QUEUE: redis://redis-queue:6379
+
+  worker-short:
+    image: frappe/erpnext:version-15
+    networks:
+      - frappe_network
+    deploy:
+      restart_policy:
+        condition: on-failure
+    command: bench worker --queue short
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+    depends_on:
+      - redis-queue
+    environment:
+      REDIS_QUEUE: redis://redis-queue:6379
+
+  worker-long:
+    image: frappe/erpnext:version-15
+    networks:
+      - frappe_network
+    deploy:
+      restart_policy:
+        condition: on-failure
+    command: bench worker --queue long
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+    depends_on:
+      - redis-queue
+    environment:
+      REDIS_QUEUE: redis://redis-queue:6379
+
+  scheduler:
+    image: frappe/erpnext:version-15
+    networks:
+      - frappe_network
+    deploy:
+      restart_policy:
+        condition: on-failure
+    command: bench schedule
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+    depends_on:
+      - redis-queue
+    environment:
+      REDIS_QUEUE: redis://redis-queue:6379
 
 volumes:
   db-data:
   redis-queue-data:
+  redis-cache-data:
   sites:
   logs:
 

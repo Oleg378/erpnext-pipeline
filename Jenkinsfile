@@ -44,14 +44,26 @@ pipeline {
 
           script {
             def siteExists = sh(
-              script: "docker compose exec ${CONTAINER_NAME} bash -c 'ls /home/frappe/frappe-bench/sites/${SITE_NAME}/site_config.json 2>/dev/null'",
+              script: "docker compose exec -T ${CONTAINER_NAME} bash -c 'ls /home/frappe/frappe-bench/sites/${SITE_NAME}/site_config.json 2>/dev/null'",
               returnStatus: true
             ) == 0
+
+            // Always rebuild frontend assets
+            sh """
+              docker compose exec -T ${CONTAINER_NAME} bash -c '
+                cd /home/frappe/frappe-bench/apps/frappe &&
+                yarn install &&
+                cd ../erpnext &&
+                yarn install &&
+                cd ../.. &&
+                bench build
+              '
+            """
 
             if (siteExists) {
               echo "Site exists. Running migration..."
               sh """
-                docker compose exec ${CONTAINER_NAME} bash -c '
+                docker compose exec -T ${CONTAINER_NAME} bash -c '
                   cd /home/frappe/frappe-bench &&
                   bench migrate &&
                   bench serve --port 8080 &
@@ -65,7 +77,7 @@ pipeline {
               '''
               echo "Launching bench server..."
               sh """
-                docker compose exec ${CONTAINER_NAME} bash -c '
+                docker compose exec -T ${CONTAINER_NAME} bash -c '
                   cd /home/frappe/frappe-bench &&
                   bench --site ${SITE_NAME} serve --port 8080 &
                   sleep 10
@@ -106,19 +118,16 @@ pipeline {
             error("Test report not found at ${TEST_REPORT}")
           }
 
-          // Parse and validate test report
           def report = readJSON file: "${TEST_REPORT}"
           if (!report.tests || report.failures == null) {
             error("Invalid test report format - missing required fields")
           }
 
-          // Determine status
           def status = report.failures == 0 ? 'success' : 'failure'
           def description = report.failures == 0 ?
             "All ${report.tests} tests passed" :
             "${report.failures} test(s) failed"
 
-          // Prepare API request
           def apiUrl = "https://api.github.com/repos/Oleg378/erpnext/statuses/${params.GIT_COMMIT}"
           def payload = """
           {
@@ -129,7 +138,6 @@ pipeline {
           }
           """.stripIndent()
 
-          // Update GitHub status
           try {
             def response = httpRequest(
               httpMode: 'POST',
@@ -137,38 +145,3 @@ pipeline {
               contentType: 'APPLICATION_JSON',
               customHeaders: [
                 [name: 'Authorization', value: "token " + GITHUB_TOKEN],
-                [name: 'Accept', value: 'application/vnd.github.v3+json']
-              ],
-              requestBody: payload,
-              validResponseCodes: '200,201,204'
-            )
-
-            echo "GitHub status updated successfully: ${status}"
-            echo "API Response: ${response.content}"
-          } catch (Exception e) {
-            echo "GitHub API Request Details:"
-            echo "URL: ${apiUrl}"
-            echo "Payload: ${payload}"
-            error("Failed to update GitHub status: ${e.getMessage()}")
-          }
-
-          // Final build decision
-          if (report.failures > 0) {
-            error("❌ Tests failed. PR rejected")
-          } else {
-            echo "✅ All checks passed - PR approved"
-          }
-        }
-      }
-    }
-  }
-
-  post {
-    always {
-      echo 'Cleaning up environment...'
-      dir("${DOCKER_DIR}") {
-        sh 'docker compose down --remove-orphans'
-      }
-    }
-  }
-}
