@@ -17,7 +17,6 @@ pipeline {
     CONTAINER_NAME = 'backend'
     TEST_REPORT = 'test-report.json'
     GITHUB_TOKEN = credentials('github-status-token')
-    GITHUB_REPORT_TOKEN = credentials('github-allure-report-token')
   }
 
   stages {
@@ -115,7 +114,7 @@ pipeline {
       steps {
         dir("${TEST_DIR}") {
           script {
-            echo "🚀 Running tests in official Playwright container..."
+            echo "Running tests in Playwright container..."
 
             sh '''
               docker run --rm \
@@ -127,9 +126,6 @@ pipeline {
                 mcr.microsoft.com/playwright:v1.54.2-jammy \
                 bash -c "
                   echo '=== Container Environment ==='
-                  echo 'Node.js: ' \$(node --version)
-                  echo 'npm: ' \$(npm --version)
-                  playwright --version
 
                   echo '\n=== Installing dependencies ==='
                   npm ci
@@ -138,12 +134,12 @@ pipeline {
                   npx playwright --version
 
                   echo '\n=== Running setup tests ==='
-                  npx playwright test --project=chromium -g @setup || echo 'Setup tests may have warnings'
+                  npx playwright test --project=chromium -g @setup
 
                   echo '\n=== Running main test suite ==='
-                  npx playwright test --project=chromium -g @api
+                  npx playwright test --project=chromium -g @api -g @sessions
 
-                  echo '\n✅ Tests completed'
+                  echo '\nTests completed'
                 "
             '''
             def lastRun = readJSON file: 'test-results/.last-run.json'
@@ -154,14 +150,11 @@ pipeline {
       }
     }
 
-    stage('Generate report in Allure container') {
+    stage('Generate report in tobix container') {
       steps {
         dir("${TEST_DIR}") {
           script {
-            echo "📊 Generating report in Allure container..."
-
-            // debug:
-            sh 'ls -la allure-results/ 2>/dev/null || echo "No allure-results folder"'
+            echo "Generating report in Allure container..."
             sh '''
                 REPORT_NAME="allure-report-$(date +%Y-%m-%d_%H-%M-%S)"
 
@@ -172,95 +165,59 @@ pipeline {
                     generate /allure-results -o "/app/${REPORT_NAME}" --clean
 
                 if [ -d "${REPORT_NAME}" ]; then
-                    echo "✅ Report generated successfully"
+                    echo "Report generated successfully"
                     echo "REPORT_FOLDER=${REPORT_NAME}" > report-info.env
                 else
-                    echo "❌ Report generation failed"
+                    echo "Report generation failed"
                     echo "REPORT_FOLDER=unknown" > report-info.env
                     exit 1
                 fi
             '''
-
-            // Check result
-            if (fileExists("report-info.env")) {
-              def reportInfo = readProperties file: 'report-info.env'
-              env.REPORT_FOLDER = reportInfo.REPORT_FOLDER
-              echo "📁 Report folder: ${env.REPORT_FOLDER}"
-
-              // Also verify the folder exists locally
-              if (env.REPORT_FOLDER != "unknown" && !fileExists(env.REPORT_FOLDER)) {
-                echo "⚠️ Report folder ${env.REPORT_FOLDER} doesn't exist locally"
-                env.REPORT_FOLDER = "unknown"
-              }
-            } else {
-              env.REPORT_FOLDER = "unknown"
-              echo "⚠️ report-info.env not created"
-            }
+            // Save result
+            def reportInfo = readProperties file: 'report-info.env'
+            env.REPORT_FOLDER = reportInfo.REPORT_FOLDER
+            echo "Report folder: ${env.REPORT_FOLDER}"
           }
         }
       }
     }
-
     stage('Publish Test Report to GitHub') {
       steps {
         dir("${TEST_DIR}") {
           script {
-            echo "🚀 Publishing report to GitHub Pages..."
+            echo "Publishing report to GitHub Pages..."
+            def reportFolder = env.REPORT_FOLDER
+            withCredentials([
+              string(credentialsId: 'github-allure-report-token', variable: 'GH_TOKEN')
+              ]) {
+              sh """
+                rm -rf /tmp/allure-reports
 
-            // Check if report was actually generated
-            def reportFolder = env.REPORT_FOLDER ?: "unknown"
-            if (reportFolder == "unknown") {
-              // Try to find any report folder
-              reportFolder = sh(
-                script: 'find . -maxdepth 1 -name "allure-report-*" -type d | head -1 | xargs basename 2>/dev/null || echo "unknown"',
-                returnStdout: true
-              ).trim()
-            }
+                git clone \
+                  --filter=blob:none \
+                  --no-checkout \
+                  https://github.com/Oleg378/allure-reports.git /tmp/allure-reports
 
-            if (reportFolder == "unknown") {
-              echo "⚠️ No report folder found, skipping GitHub Pages upload"
-              env.REPORT_URL = "https://oleg378.github.io/allure-reports/"
-              return
-            }
+                cd /tmp/allure-reports
+                git sparse-checkout init --cone
+                git sparse-checkout set docs
+                git checkout main
 
-            echo "📁 Using report folder: ${reportFolder}"
+                mkdir -p docs
+                cp -r "\${WORKSPACE}/${TEST_DIR}/${reportFolder}" docs/
 
-            sh """
-              # Clone reports repo (shallow)
-              git clone --depth 1 https://github.com/Oleg378/allure-reports.git /tmp/allure-reports
-              cd /tmp/allure-reports
+                git config user.email "jenkins@ci"
+                git config user.name "Jenkins CI"
 
-              # Create docs directory
-              mkdir -p docs
+                git add docs/${reportFolder}
+                git commit -m "Add test report ${reportFolder}" || echo "No changes to commit"
 
-              # Copy new report
-              echo "Copying report: ${reportFolder}"
-              cp -r "\${WORKSPACE}/${TEST_DIR}/${reportFolder}" "docs/" 2>/dev/null || echo "Report copy failed"
-
-              # Commit and push
-              git config user.email "jenkins@ci"
-              git config user.name "Jenkins CI"
-              git add .
-              git commit -m "Add test report ${reportFolder}"
-              git push https://x-access-token:${GITHUB_REPORT_TOKEN}@github.com/Oleg378/allure-reports.git
-
-
-              echo "✅ Report published to GitHub"
-            """
-
-            // Generate report URL
+                git push https://x-access-token:\${GH_TOKEN}@github.com/Oleg378/allure-reports.git main
+              """
+              }
             env.REPORT_URL = "https://oleg378.github.io/allure-reports/${reportFolder}/"
             env.REPORT_FOLDER = reportFolder
-            echo "🌐 Report URL: ${env.REPORT_URL}"
-
-            // Create test report JSON
-            def reportData = [
-              status: env.TEST_STATUS,
-              report_url: env.REPORT_URL,
-              timestamp: new Date().format('yyyy-MM-dd HH:mm:ss'),
-              folder: reportFolder
-            ]
-            writeJSON file: "${TEST_REPORT}", json: reportData
+            echo "Report URL: ${env.REPORT_URL}"
           }
         }
       }
@@ -271,13 +228,13 @@ pipeline {
         script {
           // Validate parameters
           if (!params.GIT_COMMIT?.trim()) {
-            error("❌ Commit SHA parameter (GIT_COMMIT) is required")
+            error("Commit SHA parameter (GIT_COMMIT) is required")
           }
           if (!params.GIT_COMMIT.matches(/^[a-f0-9]{40}$/)) {
-            error("❌ Invalid GIT_COMMIT format (expected 40-character SHA)")
+            error("Invalid GIT_COMMIT format (expected 40-character SHA)")
           }
-          if (!env.REPORT_URL?.trim() || env.REPORT_URL == "https://oleg378.github.io/allure-reports/reports/unknown/") {
-            echo "⚠️ Report URL is invalid or unknown, skipping status update"
+          if (!env.REPORT_URL?.trim() || env.REPORT_URL == "https://oleg378.github.io/allure-reports/unknown/") {
+            echo "Report URL is invalid or unknown, skipping status update"
             return
           }
 
@@ -285,7 +242,7 @@ pipeline {
           def status = env.TEST_STATUS == 'passed' ? 'success' : 'failure'
           def description = "Playwright tests ${env.TEST_STATUS}"
 
-          echo "📤 Reporting status to GitHub..."
+          echo "  Reporting status to GitHub..."
           echo "  Commit: ${params.GIT_COMMIT}"
           echo "  Status: ${status}"
           echo "  Report: ${env.REPORT_URL}"
@@ -310,10 +267,9 @@ pipeline {
               ],
               requestBody: payload
             )
-            echo "✅ Status reported to GitHub: ${status}"
+            echo "Status reported to GitHub: ${status}"
           } catch (Exception e) {
-            echo "⚠️ Failed to report status to GitHub: ${e.getMessage()}"
-            // Don't fail the pipeline - status reporting is secondary
+            echo "Failed to report status to GitHub: ${e.getMessage()}"
           }
         }
       }
@@ -323,33 +279,33 @@ pipeline {
   post {
     always {
       echo "========================================"
-      echo "📊 Test Status: ${env.TEST_STATUS ?: 'UNKNOWN'}"
-      echo "📁 Report Folder: ${env.REPORT_FOLDER ?: 'NOT_GENERATED'}"
-      echo "🌐 Report URL: ${env.REPORT_URL ?: 'NOT_AVAILABLE'}"
+      echo " Test Status: ${env.TEST_STATUS ?: 'UNKNOWN'}"
+      echo " Report Folder: ${env.REPORT_FOLDER ?: 'NOT_GENERATED'}"
+      echo " Report URL: ${env.REPORT_URL ?: 'NOT_AVAILABLE'}"
       echo "========================================"
 
       // 1. Delete test-results and allure-results from TEST_DIR
       dir("${TEST_DIR}") {
         sh '''
-          echo "🧹 Cleaning test artifacts..."
+          echo " Cleaning test artifacts..."
           rm -rf test-results allure-results 2>/dev/null || true
-          echo "✅ Test artifacts removed"
+          echo " Test artifacts removed"
         '''
       }
 
       // 2. Delete tmp
       sh '''
-        echo "🗑️  Cleaning temporary files..."
+        echo "️  Cleaning temporary files..."
         rm -rf /tmp/allure-reports* /tmp/network.env 2>/dev/null || true
-        echo "✅ Temporary files removed"
+        echo " Temporary files removed"
       '''
 
       // 3. Stop docker compose
       dir("${DOCKER_DIR}") {
         sh '''
-          echo "🐳 Stopping Docker containers..."
+          echo " Stopping Docker containers..."
           docker compose down 2>/dev/null || echo "Docker already stopped"
-          echo "✅ Docker containers stopped"
+          echo " Docker containers stopped"
         '''
       }
     }
