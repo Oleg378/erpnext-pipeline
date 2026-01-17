@@ -17,7 +17,9 @@ jobs:
         run: |          
           BRANCH="${{ github.event.client_payload.branch }}"
           COMMIT="${{ github.event.client_payload.commit }}"
-          URL="$JENKINS_URL/job/$JOB_NAME/buildWithParameters?PR_BRANCH=${BRANCH}&GIT_COMMIT=${COMMIT}"
+          LABELS_JSON="${{ github.event.client_payload.labels }}"
+          LABEL_NAMES=$(echo "$LABELS_JSON" | jq -r '.[].name' | paste -sd "," -)
+          URL="$JENKINS_URL/job/$JOB_NAME/buildWithParameters?PR_BRANCH=${BRANCH}&GIT_COMMIT=${COMMIT}&LABELS=${LABEL_NAMES}"
 
           echo "Triggering Jenkins with URL: ${URL}"
           curl -X POST "$URL" --user "$JENKINS_USERNAME:$JENKINS_TOKEN"
