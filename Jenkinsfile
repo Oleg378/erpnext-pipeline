@@ -4,6 +4,7 @@ pipeline {
   parameters {
     string(name: 'PR_BRANCH', defaultValue: 'version-15', description: 'Branch to test (e.g., feature/my-fix)')
     string(name: 'GIT_COMMIT', defaultValue: '', description: 'Git commit SHA to report status to')
+    string(name: 'LABELS', defaultValue: '', description: 'defines what tests to trigger; empty value means full regression; ')
   }
 
   environment {
@@ -115,11 +116,36 @@ pipeline {
         dir("${TEST_DIR}") {
           script {
             echo "Running tests in Playwright container..."
+            echo "Labels: ${params.LABELS}"
+            def testTags = ''
+            def testGroups = [] as Set // run smoke by default
+            def labels = []
+            if (params.LABELS) {
+              labels = params.LABELS.split(',')
+            }
+            if (labels.contains('api')) {
+              testGroups.add('@api')
+            }
+            if (labels.contains('flows')) {
+               testGroups.add('@sales')
+            }
+            if (labels.contains('smoke')) {
+               testGroups.add('@api')
+               testGroups.add('@sessions')
+            }
+            if (labels.contains('full-regression')) {
+               testGroups.clear()  // Empty the set for full regression
+            }
+            if (!testGroups.isEmpty()) {
+              testTags = " " + testGroups.collect { "-g ${it}" }.join(' ')
+            }
 
-            sh '''
+
+            sh """
+              echo "testTags: ${testTags}"
               docker run --rm \
-                --network ${DOCKER_NETWORK} \
-                -v $(pwd):/app \
+                --network \${DOCKER_NETWORK} \
+                -v \$(pwd):/app \
                 -w /app \
                 -e BASE_URL=http://backend:8080 \
                 -e HEADLESS=true \
@@ -137,11 +163,11 @@ pipeline {
                   npx playwright test --project=chromium -g @setup
 
                   echo '\n=== Running main test suite ==='
-                  npx playwright test --project=chromium -g @api -g @sessions
+                  npx playwright test --project=chromium${testTags}
 
                   echo '\nTests completed'
                 "
-            '''
+            """
             def lastRun = readJSON file: 'test-results/.last-run.json'
             env.TEST_STATUS = lastRun.status
             echo "Test status: ${env.TEST_STATUS}"
