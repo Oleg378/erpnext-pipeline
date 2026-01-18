@@ -17,7 +17,9 @@ jobs:
         run: |          
           BRANCH="${{ github.event.client_payload.branch }}"
           COMMIT="${{ github.event.client_payload.commit }}"
-          LABELS_JSON="${{ github.event.client_payload.labels }}"
+          LABELS_JSON='${{ toJson(github.event.client_payload.labels) }}'
+          echo "LABELS_JSON: $LABELS_JSON"
+          
           LABEL_NAMES=$(echo "$LABELS_JSON" | jq -r '.[].name' | paste -sd "," -)
           URL="$JENKINS_URL/job/$JOB_NAME/buildWithParameters?PR_BRANCH=${BRANCH}&GIT_COMMIT=${COMMIT}&LABELS=${LABEL_NAMES}"
 
