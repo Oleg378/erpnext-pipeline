@@ -3,8 +3,9 @@ pipeline {
 
   parameters {
     string(name: 'PR_BRANCH', defaultValue: 'version-15', description: 'Branch to test (e.g., feature/my-fix)')
-    string(name: 'GIT_COMMIT', defaultValue: '', description: 'Git commit SHA to report status to')
+    string(name: 'GIT_COMMIT', defaultValue: '', description: 'Git commit SHA to report status to; this is not empty if trigger source is GitHub')
     string(name: 'LABELS', defaultValue: '', description: 'defines what tests to trigger; empty value means full regression; ')
+    string(name: 'JIRA_ISSUE_KEY', defaultValue: '', description: 'This is not empty if trigger source is JIRA')
   }
 
   environment {
@@ -18,9 +19,26 @@ pipeline {
     CONTAINER_NAME = 'backend'
     TEST_REPORT = 'test-report.json'
     GITHUB_TOKEN = credentials('github-status-token')
+    JIRA_TOKEN = credentials('jira-status-token')
+    JIRA_USER_EMAIL = 'shieldtablet42@gmail.com'
   }
 
   stages {
+    stage('Detect trigger source') {
+      steps {
+        script {
+          if (params.GIT_COMMIT?.trim()) {
+            env.TRIGGER_SOURCE = 'github'
+          } else if (params.JIRA_ISSUE_KEY?.trim()) {
+            env.TRIGGER_SOURCE = 'jira'
+          } else {
+            env.TRIGGER_SOURCE = 'manual'
+          }
+            echo "Detected trigger source: ${env.TRIGGER_SOURCE}"
+        }
+      }
+    }
+
     stage('Checkout ERPNext PR') {
       steps {
         dir("${ERP_DIR}") {
@@ -137,7 +155,7 @@ pipeline {
                testGroups.clear()  // Empty the set for full regression
             }
             if (!testGroups.isEmpty()) {
-              testTags = " " + testGroups.collect { "-g ${it}" }.join(' ')
+              testTags = ' -g \\"' + testGroups.collect { "${it}" }.join('|') + '\\"'
             }
 
 
@@ -250,14 +268,19 @@ pipeline {
     }
 
     stage('Report Status to GitHub PR') {
+      when {
+        expression { env.TRIGGER_SOURCE == 'github' }
+      }
       steps {
         script {
           // Validate parameters
           if (!params.GIT_COMMIT?.trim()) {
-            error("Commit SHA parameter (GIT_COMMIT) is required")
+            echo "Commit SHA parameter (GIT_COMMIT) is required"
+            return
           }
           if (!params.GIT_COMMIT.matches(/^[a-f0-9]{40}$/)) {
-            error("Invalid GIT_COMMIT format (expected 40-character SHA)")
+            echo "Invalid GIT_COMMIT format (expected 40-character SHA)"
+            return
           }
           if (!env.REPORT_URL?.trim() || env.REPORT_URL == "https://oleg378.github.io/allure-reports/unknown/") {
             echo "Report URL is invalid or unknown, skipping status update"
@@ -296,6 +319,92 @@ pipeline {
             echo "Status reported to GitHub: ${status}"
           } catch (Exception e) {
             echo "Failed to report status to GitHub: ${e.getMessage()}"
+          }
+        }
+      }
+    }
+    stage('Report Status to Jira') {
+      when {
+        expression { env.TRIGGER_SOURCE == 'jira' }
+      }
+      steps {
+        script {
+          // Validate parameters
+          if (!params.JIRA_ISSUE_KEY?.trim()) {
+            echo "JIRA_ISSUE_KEY missing, skipping Jira reporting"
+            return
+          }
+
+          if (!env.REPORT_URL?.trim() || env.REPORT_URL.endsWith('/unknown/')) {
+            echo "Report URL is invalid or unknown, skipping Jira reporting"
+            return
+          }
+
+          def status = env.TEST_STATUS == 'passed' ? 'PASSED' : 'FAILED'
+          def emoji  = env.TEST_STATUS == 'passed' ? '✅' : '❌'
+
+          def basicAuth = "Basic " + "${JIRA_USER_EMAIL}:${JIRA_TOKEN}".bytes.encodeBase64().toString()
+
+          def commentPayload = groovy.json.JsonOutput.toJson([
+            body: [
+              type: 'doc',
+              version: 1,
+              content: [
+                [
+                  type: 'paragraph',
+                  content: [
+                    [
+                      type: 'text',
+                      text: "${emoji} Automated tests completed\n" +
+                            "Status: ${status}\n" +
+                            "Branch: ${params.PR_BRANCH}\n" +
+                            "Labels: ${params.LABELS ?: 'full-regression'}\n"
+                    ],
+                    [
+                      type: 'text',
+                      text: "Report",
+                      marks: [
+                        [type: 'link', attrs: [href: env.REPORT_URL]]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ])
+
+          echo "Reporting status to Jira issue ${params.JIRA_ISSUE_KEY}"
+
+          try {
+            httpRequest(
+              httpMode: 'POST',
+              url: "https://kalman-oleg.atlassian.net/rest/api/3/issue/${params.JIRA_ISSUE_KEY}/comment",
+              contentType: 'APPLICATION_JSON',
+              customHeaders: [
+                [name: 'Authorization', value: basicAuth],
+                [name: 'Accept', value: 'application/json']
+              ],
+              requestBody: commentPayload
+            )
+            echo "Comment posted to Jira"
+
+            // Hardcoded transition ID 31 represents status Done
+            def transitionPayload = groovy.json.JsonOutput.toJson([
+              transition: [id: "31"]
+            ])
+            httpRequest(
+              httpMode: 'POST',
+              url: "https://kalman-oleg.atlassian.net/rest/api/3/issue/${params.JIRA_ISSUE_KEY}/transitions",
+              contentType: 'APPLICATION_JSON',
+              customHeaders: [
+                [name: 'Authorization', value: basicAuth],
+                [name: 'Accept', value: 'application/json']
+              ],
+              requestBody: transitionPayload
+            )
+            echo "Jira issue transitioned to Done"
+          } catch (Exception e) {
+            echo "Failed to report status to Jira: ${e.getMessage()}"
           }
         }
       }
