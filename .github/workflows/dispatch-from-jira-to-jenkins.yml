@@ -21,7 +21,7 @@ jobs:
           JIRA_ISSUE_KEY="${{ github.event.client_payload.issue }}"
           
           # Convert labels array to comma-separated string
-          LABEL_NAMES='${{ toJson(github.event.client_payload.labels) }}'
+          LABEL_NAMES="${{ github.event.client_payload.labels }}"
           
           # Construct Jenkins URL
           URL="$JENKINS_URL/job/$JOB_NAME/buildWithParameters?PR_BRANCH=${BRANCH}&JIRA_ISSUE_KEY=${JIRA_ISSUE_KEY}&LABELS=${LABEL_NAMES}"

@@ -1,4 +1,4 @@
-name: Proxy Trigger for Jenkins
+name: ERPNext Proxy Trigger for Jenkins
 
 on:
   repository_dispatch:
