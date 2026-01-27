@@ -20,7 +20,7 @@ pipeline {
     TEST_REPORT = 'test-report.json'
     GITHUB_TOKEN = credentials('github-status-token')
     JIRA_TOKEN = credentials('jira-status-token')
-    JIRA_USER_EMAIL = 'shieldtablet42@gmail.com'
+    JIRA_USER_EMAIL = credentials('jira-email')
   }
 
   stages {
@@ -167,12 +167,12 @@ pipeline {
                 -w /app \
                 -e BASE_URL=http://backend:8080 \
                 -e HEADLESS=true \
-                mcr.microsoft.com/playwright:v1.54.2-jammy \
+                mcr.microsoft.com/playwright:v1.58.0-jammy \
                 bash -c "
                   echo '=== Container Environment ==='
 
                   echo '\n=== Installing dependencies ==='
-                  npm ci
+                  npm ci --only=production
 
                   echo '\n=== Actual Playwright version ==='
                   npx playwright --version
