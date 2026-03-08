@@ -167,7 +167,7 @@ pipeline {
                 -w /app \
                 -e BASE_URL=http://backend:8080 \
                 -e HEADLESS=true \
-                mcr.microsoft.com/playwright:v1.58.0-jammy \
+                mcr.microsoft.com/playwright:v1.58.2-jammy \
                 bash -c "
                   echo '=== Container Environment ==='
 
